@@ -108,7 +108,7 @@ jobs:
 
       - name: Run champion scraper
         id: scrape
-        timeout-minutes: 20
+        timeout-minutes: 25
         env:
           TURSO_DB_URL: ${{ secrets.TURSO_DB_URL }}
           TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
@@ -120,7 +120,7 @@ jobs:
 
           # Show initial progress
           echo "🚀 Starting champion scraper..."
-          echo "⏰ Timeout: 20 minutes"
+          echo "⏰ Timeout: 25 minutes"
 
           # Run with progress monitoring
           (
@@ -136,7 +136,7 @@ jobs:
           PROGRESS_PID=$!
 
           # Run the scraper with timeout
-          timeout 20m python lambda_function.py > scraper_output.log 2>&1 &
+          timeout 25m python lambda_function.py > scraper_output.log 2>&1 &
           SCRAPER_PID=$!
           wait $SCRAPER_PID
           EXIT_CODE=$?
@@ -150,7 +150,7 @@ jobs:
             echo "✅ Scraping script completed successfully"
           elif [ $EXIT_CODE -eq 124 ]; then
             echo "SCRAPE_EXIT_CODE=124" >> $GITHUB_ENV
-            echo "⏰ Scraping script timed out after 20 minutes"
+            echo "⏰ Scraping script timed out after 25 minutes"
           else
             echo "SCRAPE_EXIT_CODE=$EXIT_CODE" >> $GITHUB_ENV
             echo "⚠️ Scraping script exited with code $EXIT_CODE"
