@@ -347,15 +347,22 @@ class ScrapingOrchestrator:
             if current_patch is None:
                 current_patch = target_patch
             
-            # Scrape data with both patches
-            raw_data = self.scraper.scrape_champion_data(champion, current_patch, target_patch, skip_wiki)
+            # Get current data for smart updates AND to check if abilities are empty
+            storage = self.storage
+            current_data = storage.get_champion_data(champion) if storage else None
+
+            # Override skip_wiki if abilities are currently empty for this champion
+            skip_wiki_for_champ = skip_wiki
+            if current_data is None or not current_data.get('abilities'):
+                if skip_wiki:
+                    self.logger.info(f"⚠️ Overriding skip_wiki for {champion} because current abilities are empty.")
+                skip_wiki_for_champ = False
+
+            # Scrape data with both patches and updated skip logic
+            raw_data = self.scraper.scrape_champion_data(champion, current_patch, target_patch, skip_wiki_for_champ)
 
             # Process data
             processed_data = self.processor.process_champion_data(raw_data)
-
-            # Get current data for smart updates
-            storage = self.storage
-            current_data = storage.get_champion_data(champion) if storage else None
 
             # Determine update strategy - pass current_patch for abilities tracking
             update_decision = self.processor.should_update_champion(current_data, raw_data, current_patch)

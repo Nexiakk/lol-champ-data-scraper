@@ -48,7 +48,7 @@ class TursoManager:
         conn = None
         try:
             conn = self._get_conn()
-            cursor = conn.execute("SELECT * FROM champions WHERE id = ?", (champion_key,))
+            cursor = conn.execute("SELECT id, name, patch, abilities_patch, roles_json, abilities_json FROM champions WHERE id = ?", (champion_key,))
             row = cursor.fetchone()
             if not row:
                 return None
@@ -60,8 +60,8 @@ class TursoManager:
             return {
                 "id": row[0],
                 "name": row[1],
-                "imageName": row[2],
-                "patch": row[3],
+                "patch": row[2],
+                "abilitiesPatch": row[3],
                 "roles": roles,
                 "abilities": abilities
             }
@@ -78,22 +78,22 @@ class TursoManager:
         try:
             conn = self._get_conn()
             name = data.get("name", champion_key)
-            image_name = data.get("imageName", "")
             patch = data.get("patch", "")
+            abilities_patch = data.get("abilitiesPatch", "")
             roles_json = json.dumps(data.get("roles", {}))
             abilities_json = json.dumps(data.get("abilities", []))
             
             conn.execute('''
-                INSERT INTO champions (id, name, image_name, patch, roles_json, abilities_json) 
+                INSERT INTO champions (id, name, patch, abilities_patch, roles_json, abilities_json) 
                 VALUES (?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET 
                     name = excluded.name,
-                    image_name = excluded.image_name,
                     patch = excluded.patch,
+                    abilities_patch = excluded.abilities_patch,
                     roles_json = excluded.roles_json,
                     abilities_json = excluded.abilities_json,
                     last_updated = CURRENT_TIMESTAMP
-            ''', (champion_key, name, image_name, patch, roles_json, abilities_json))
+            ''', (champion_key, name, patch, abilities_patch, roles_json, abilities_json))
             conn.commit()
             return True
         except Exception as e:
@@ -155,12 +155,14 @@ class TursoManager:
         conn = None
         try:
             conn = self._get_conn()
-            cursor = conn.execute("SELECT abilities_patch, abilities_last_updated FROM global_info WHERE id = 'data'")
+            cursor = conn.execute("SELECT patch, patch_last_updated, abilities_patch, abilities_last_updated FROM global_info WHERE id = 'data'")
             row = cursor.fetchone()
             if row:
                 return {
-                    'abilitiesPatch': row[0],
-                    'abilitiesLastUpdated': row[1]
+                    'patch': row[0],
+                    'patchLastUpdated': row[1],
+                    'abilitiesPatch': row[2],
+                    'abilitiesLastUpdated': row[3]
                 }
             return None
         except Exception as e:
@@ -170,18 +172,38 @@ class TursoManager:
             if conn:
                 conn.close()
 
-    def update_global_patch_info(self, patch: str) -> bool:
+    def update_global_patch_info(self, abilities_patch: Optional[str] = None, patch: Optional[str] = None) -> bool:
         """Update global patch metadata"""
         conn = None
         try:
             conn = self._get_conn()
-            conn.execute('''
-                INSERT INTO global_info (id, abilities_patch, abilities_last_updated) 
-                VALUES ('data', ?, CURRENT_TIMESTAMP)
-                ON CONFLICT(id) DO UPDATE SET 
-                    abilities_patch = excluded.abilities_patch,
-                    abilities_last_updated = CURRENT_TIMESTAMP
-            ''', (patch,))
+            if abilities_patch and patch:
+                conn.execute('''
+                    INSERT INTO global_info (id, abilities_patch, abilities_last_updated, patch, patch_last_updated) 
+                    VALUES ('data', ?, CURRENT_TIMESTAMP, ?, CURRENT_TIMESTAMP)
+                    ON CONFLICT(id) DO UPDATE SET 
+                        abilities_patch = excluded.abilities_patch,
+                        abilities_last_updated = CURRENT_TIMESTAMP,
+                        patch = excluded.patch,
+                        patch_last_updated = CURRENT_TIMESTAMP
+                ''', (abilities_patch, patch))
+            elif abilities_patch:
+                conn.execute('''
+                    INSERT INTO global_info (id, abilities_patch, abilities_last_updated) 
+                    VALUES ('data', ?, CURRENT_TIMESTAMP)
+                    ON CONFLICT(id) DO UPDATE SET 
+                        abilities_patch = excluded.abilities_patch,
+                        abilities_last_updated = CURRENT_TIMESTAMP
+                ''', (abilities_patch,))
+            elif patch:
+                conn.execute('''
+                    INSERT INTO global_info (id, patch, patch_last_updated) 
+                    VALUES ('data', ?, CURRENT_TIMESTAMP)
+                    ON CONFLICT(id) DO UPDATE SET 
+                        patch = excluded.patch,
+                        patch_last_updated = CURRENT_TIMESTAMP
+                ''', (patch,))
+                
             conn.commit()
             return True
         except Exception as e:

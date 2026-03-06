@@ -120,12 +120,16 @@ def scrape_and_store_data():
     # Update global patch info if we scraped wiki abilities (i.e., didn't skip)
     if orchestrator.turso_available and not skip_wiki:
         try:
-            orchestrator.turso_manager.update_global_patch_info(current_patch)
-            _logger.info(f"✅ Updated global abilities patch to {current_patch}")
+            orchestrator.turso_manager.update_global_patch_info(abilities_patch=current_patch, patch=target_patch)
+            _logger.info(f"✅ Updated global patches (abilities: {current_patch}, patch: {target_patch})")
         except Exception as e:
             _logger.error(f"❌ Failed to update global patch info: {e}")
-    elif skip_wiki:
-        _logger.info("⏭️ Skipped wiki scraping - global patch info unchanged")
+    elif skip_wiki and orchestrator.turso_available:
+        try:
+            orchestrator.turso_manager.update_global_patch_info(patch=target_patch)
+            _logger.info("⏭️ Skipped wiki scraping - updating global general patch info only")
+        except Exception as e:
+            _logger.error(f"❌ Failed to update global general patch info: {e}")
 
     # Update role containers for optimized queries (only if Turso is available)
     if orchestrator.turso_available:
