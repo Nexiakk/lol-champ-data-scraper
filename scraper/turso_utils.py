@@ -36,51 +36,87 @@ class ConnectionPool:
         self._active_connections = 0
         
     def _create_connection(self):
-        """Create a new database connection"""
-        conn = libsql.connect(self.db_url, auth_token=self.auth_token)
-        with self._lock:
-            self._created_count += 1
-            self._active_connections += 1
-        _logger.debug(f"Created new connection (total created: {self._created_count}, active: {self._active_connections})")
-        return conn
+        """Create a new database connection with timeout handling"""
+        import concurrent.futures
+        
+        _logger.info(f"Attempting to create database connection...")
+        
+        def _connect():
+            """Inner function to create connection"""
+            _logger.debug(f"Connecting to {self.db_url[:50]}...")
+            conn = libsql.connect(self.db_url, auth_token=self.auth_token)
+            _logger.debug("Connection established successfully")
+            return conn
+        
+        executor = None
+        try:
+            # Use ThreadPoolExecutor to add timeout to connection creation
+            # libsql.connect() can hang indefinitely if network is unavailable
+            executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+            future = executor.submit(_connect)
+            try:
+                # Wait up to 30 seconds for connection (increased from 10s)
+                _logger.debug("Waiting for connection (timeout: 30s)...")
+                conn = future.result(timeout=30)
+                with self._lock:
+                    self._created_count += 1
+                    self._active_connections += 1
+                _logger.info(f"Successfully created database connection (total created: {self._created_count})")
+                return conn
+            except concurrent.futures.TimeoutError:
+                _logger.error("Connection creation timed out after 30 seconds - Turso may be unreachable")
+                raise TimeoutError("Database connection timed out after 30 seconds - check network connectivity to Turso")
+        except Exception as e:
+            _logger.error(f"Failed to create database connection: {type(e).__name__}: {e}")
+            raise
+        finally:
+            if executor:
+                # Don't wait for pending futures - just shutdown immediately
+                # This prevents the executor from hanging when libsql.connect() blocks
+                executor.shutdown(wait=False)
         
     def get_connection(self):
         """
         Get a connection from the pool.
         Creates a new one if pool is empty and under max_size.
         """
+        # First, try to get existing connection from pool
         try:
-            # Try to get existing connection from pool
             conn = self._pool.get_nowait()
             # Validate connection is still usable
             try:
                 conn.execute("SELECT 1")
                 with self._lock:
                     self._active_connections += 1
+                _logger.debug(f"Reused connection from pool (active: {self._active_connections})")
                 return conn
             except Exception:
                 # Connection is stale, discard it
-                _logger.debug("Discarded stale connection")
+                _logger.debug("Discarded stale connection, creating new one")
                 with self._lock:
-                    self._active_connections -= 1
+                    self._created_count -= 1
                 return self._create_connection()
         except Empty:
-            # Pool is empty
-            with self._lock:
-                if self._created_count < self.max_size:
-                    return self._create_connection()
-            
-            # At max connections, wait for one to be returned
-            _logger.debug("Connection pool exhausted, waiting...")
-            try:
-                conn = self._pool.get(timeout=self.timeout)
-                with self._lock:
-                    self._active_connections += 1
-                return conn
-            except Empty:
-                # Timeout, create a new one anyway (will be cleaned up later)
-                _logger.warning("Connection pool timeout, creating temporary connection")
+            pass
+        
+        # Pool is empty, check if we can create a new connection
+        with self._lock:
+            if self._created_count < self.max_size:
+                _logger.debug(f"Pool empty, creating new connection ({self._created_count}/{self.max_size})")
                 return self._create_connection()
+        
+        # At max connections, wait for one to be returned
+        _logger.debug(f"Connection pool at max ({self._created_count}/{self._created_count}), waiting up to {self.timeout}s...")
+        try:
+            conn = self._pool.get(timeout=self.timeout)
+            with self._lock:
+                self._active_connections += 1
+            _logger.debug("Got connection from pool after waiting")
+            return conn
+        except Empty:
+            # Timeout, create a new one anyway (will be cleaned up later)
+            _logger.warning(f"Connection pool timeout after {self.timeout}s, creating temporary connection")
+            return self._create_connection()
     
     def release_connection(self, conn):
         """Return a connection to the pool"""
