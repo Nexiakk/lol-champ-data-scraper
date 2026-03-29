@@ -5,13 +5,33 @@ Handles libsql connection and data operations cleanly using libsql_experimental.
 
 import os
 import json
+import time
 from typing import Dict, List, Optional, Any
 from datetime import datetime
+from functools import wraps
 import libsql_experimental as libsql
 
 from .logging_utils import get_logger
 
 _logger = get_logger(__name__)
+
+
+def retry_on_stream_error(max_retries=3):
+    """Retry decorator for Turso stream errors"""
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            for attempt in range(max_retries):
+                try:
+                    return func(*args, **kwargs)
+                except Exception as e:
+                    if "stream not found" in str(e) and attempt < max_retries - 1:
+                        time.sleep(1 + attempt)  # 1s, 2s, 3s delays
+                        continue
+                    raise
+        return wrapper
+    return decorator
+
 
 class TursoConfig:
     """Configuration for Turso connection"""
@@ -47,6 +67,7 @@ class TursoManager:
             _logger.error(f"Turso initialization failed: {e}")
             return False
 
+    @retry_on_stream_error(max_retries=3)
     def get_champion_data(self, champion_key: str) -> Optional[Dict[str, Any]]:
         """Get champion data from Turso"""
         conn = None
@@ -76,6 +97,7 @@ class TursoManager:
             if conn:
                 conn.close()
 
+    @retry_on_stream_error(max_retries=3)
     def store_champion_data(self, champion_key: str, data: Dict[str, Any]) -> bool:
         """Store champion data in Turso"""
         conn = None

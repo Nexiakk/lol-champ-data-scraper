@@ -111,7 +111,7 @@ def scrape_and_store_data():
             return (champion, False, f"{e}\n{traceback.format_exc()}")
 
     # Process champions in parallel with ThreadPoolExecutor
-    max_workers = 5  # Conservative to avoid rate limiting
+    max_workers = 3  # Reduced to avoid Turso stream errors
     _logger.info(f"Starting parallel processing with {max_workers} workers")
 
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
