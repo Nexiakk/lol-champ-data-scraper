@@ -164,7 +164,9 @@ def extract_description(skill_div) -> Optional[str]:
     content_div = skill_div.find('div', class_='ability-info-content')
     if content_div:
         # Get the full text content
-        description = content_div.get_text(strip=True)
+        # Use separator=' ' to add space between text nodes from different elements
+        # This prevents text like "Aatroxcan activateThe Darkin Blade" -> "Aatrox can activate The Darkin Blade"
+        description = content_div.get_text(separator=' ', strip=True)
         if description:
             return description
     
