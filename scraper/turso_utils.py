@@ -26,7 +26,9 @@ def retry_on_stream_error(max_retries=3):
                     return func(*args, **kwargs)
                 except Exception as e:
                     if "stream not found" in str(e) and attempt < max_retries - 1:
-                        time.sleep(1 + attempt)  # 1s, 2s, 3s delays
+                        wait_time = 1 + attempt  # 1s, 2s, 3s delays
+                        _logger.warning(f"Stream error in {func.__name__}, retrying in {wait_time}s (attempt {attempt + 1}/{max_retries})")
+                        time.sleep(wait_time)
                         continue
                     raise
         return wrapper
@@ -92,7 +94,7 @@ class TursoManager:
             }
         except Exception as e:
             _logger.error(f"Error getting champion data for {champion_key}: {e}")
-            return None
+            raise  # Re-raise so decorator can retry
         finally:
             if conn:
                 conn.close()
@@ -124,7 +126,7 @@ class TursoManager:
             return True
         except Exception as e:
             _logger.error(f"Error storing champion data for {champion_key}: {e}")
-            return False
+            raise  # Re-raise so decorator can retry
         finally:
             if conn:
                 conn.close()
