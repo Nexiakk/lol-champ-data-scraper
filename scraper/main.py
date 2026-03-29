@@ -4,8 +4,10 @@ Uses shared utilities and modern Python practices.
 """
 
 import os
+import requests
 from typing import Dict, List, Optional
 from datetime import datetime
+from bs4 import BeautifulSoup
 
 # Import refactored utilities
 from .utils import (
@@ -14,7 +16,6 @@ from .utils import (
     get_champion_list, normalize_patch_for_lolalytics,
     encode_champion_name_for_wiki, encode_champion_name_for_lolalytics
 )
-from .firebase_utils import FirebaseManager, FirebaseConfig
 from .logging_utils import get_logger, log_scraping_start, log_scraping_success, log_scraping_error
 from .config import get_config
 from .models import ChampionData, ScrapingResult
@@ -25,7 +26,6 @@ from .wiki_scraper import scrape_champion_abilities
 # check_patch_viability is defined locally below
 
 # Global instances
-_firebase_manager: Optional[FirebaseManager] = None
 _logger = get_logger(__name__)
 
 def normalize_patch_for_lolalytics(patch_version):
