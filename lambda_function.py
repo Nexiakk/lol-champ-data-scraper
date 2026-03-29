@@ -10,6 +10,7 @@ import random
 import requests
 from typing import Dict, List, Optional, Tuple
 from datetime import datetime
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # Import refactored utilities
 from scraper.utils import (
@@ -25,8 +26,8 @@ from scraper.lolalytics_build_scraper import LolalyticsBuildScraper
 from scraper.wiki_scraper import scrape_champion_abilities
 from scraper.services import ScrapingOrchestrator
 
-# Legacy import for backward compatibility
-from scraper.main_legacy import check_patch_viability
+# Import from main (which has its own check_patch_viability)
+from scraper.main import check_patch_viability
 
 # Global instances
 _turso_manager: Optional[TursoManager] = None
@@ -97,25 +98,39 @@ def scrape_and_store_data():
     success_count = 0
     error_count = 0
 
-    # Process each champion using the orchestrator
-    # Pass both current_patch (for wiki abilities) and target_patch (for lolalytics)
-    for i, champion in enumerate(champions):
-        _logger.info(f"Processing champion {i+1}/{len(champions)}: {champion}")
-
+    def process_champion(champion: str) -> Tuple[str, bool, Optional[str]]:
+        """Worker function for parallel processing. Returns (champion, success, error)."""
         try:
             result = orchestrator.scrape_and_store_champion(champion, target_patch, current_patch, skip_wiki)
-
             if result.success:
+                return (champion, True, None)
+            else:
+                return (champion, False, result.error)
+        except Exception as e:
+            import traceback
+            return (champion, False, f"{e}\n{traceback.format_exc()}")
+
+    # Process champions in parallel with ThreadPoolExecutor
+    max_workers = 5  # Conservative to avoid rate limiting
+    _logger.info(f"Starting parallel processing with {max_workers} workers")
+
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        future_to_champion = {
+            executor.submit(process_champion, champ): champ 
+            for champ in champions
+        }
+
+        completed = 0
+        for future in as_completed(future_to_champion):
+            completed += 1
+            champion, success, error = future.result()
+
+            if success:
                 success_count += 1
+                _logger.info(f"[{completed}/{len(champions)}] ✅ {champion}")
             else:
                 error_count += 1
-                _logger.error(f"Failed to process {champion}: {result.error}")
-        except Exception as e:
-            error_count += 1
-            _logger.error(f"❌ Critical error processing {champion}: {e}")
-            import traceback
-            _logger.error(traceback.format_exc())
-            # Continue to next champion instead of crashing
+                _logger.error(f"[{completed}/{len(champions)}] ❌ {champion}: {error}")
 
     # Update global patch info if we scraped wiki abilities (i.e., didn't skip)
     if orchestrator.turso_available and not skip_wiki:
@@ -357,9 +372,9 @@ def cleanup_old_patch_data():
 if __name__ == "__main__":
     try:
         scrape_and_store_data()
-        print("✅ Champion scraping completed successfully!")
+        _logger.info("Champion scraping completed successfully!")
     except Exception as e:
-        print(f"❌ Error during scraping: {e}")
+        _logger.error(f"Error during scraping: {e}")
         import traceback
-        traceback.print_exc()
+        _logger.error(traceback.format_exc())
         exit(1)

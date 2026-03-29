@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 class ScrapingConfig:
     """Configuration for scraping operations"""
     request_timeout: int = 15
-    rate_limit_delay: float = 1.0
+    rate_limit_delay: float = 0.5
     max_retries: int = 3
     user_agent: str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
     cache_timeout: int = 3600  # 1 hour

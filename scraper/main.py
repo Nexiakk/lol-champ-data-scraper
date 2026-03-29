@@ -22,7 +22,7 @@ from .lolalytics_build_scraper import LolalyticsBuildScraper
 from .wiki_scraper import scrape_champion_abilities
 
 # Legacy import for backward compatibility
-from .main_legacy import check_patch_viability
+# check_patch_viability is defined locally below
 
 # Global instances
 _firebase_manager: Optional[FirebaseManager] = None
@@ -57,7 +57,7 @@ def parse_wiki_date(date_text):
         # Parse format like "January 8 2026"
         return datetime.strptime(date_text, '%B %d %Y')
     except ValueError:
-        print(f"Could not parse date: {date_text}")
+        _logger.warning(f"Could not parse date: {date_text}")
         return None
 
 def wiki_to_riot_patch(wiki_version):
@@ -76,7 +76,7 @@ def wiki_to_riot_patch(wiki_version):
         return f"{riot_major}.{int(patch_num)}"  # "16.1"
 
     except (ValueError, IndexError):
-        print(f"Could not convert wiki version: {wiki_version}")
+        _logger.warning(f"Could not convert wiki version: {wiki_version}")
         return None
 
 def scrape_wiki_patches(current_year):
@@ -124,7 +124,7 @@ def scrape_wiki_patches(current_year):
         return patches
 
     except Exception as e:
-        print(f"Error scraping wiki patches: {e}")
+        _logger.error(f"Error scraping wiki patches: {e}")
         return []
 
 def check_patch_viability(current_patch_full):
@@ -133,7 +133,7 @@ def check_patch_viability(current_patch_full):
     Returns tuple: (use_current_patch, target_patch, metrics)
     """
     try:
-        print(f"🔍 Checking patch {current_patch_full} viability using Wiki data...")
+        _logger.info(f"Checking patch {current_patch_full} viability using Wiki data...")
 
         # Normalize patch format (16.1.1 -> 16.1)
         current_patch_short = normalize_patch_for_lolalytics(current_patch_full)
@@ -143,7 +143,7 @@ def check_patch_viability(current_patch_full):
         wiki_patches = scrape_wiki_patches(current_year)
 
         if not wiki_patches:
-            print("⚠️ No wiki patches found, falling back to previous patch")
+            _logger.warning("No wiki patches found, falling back to previous patch")
             return False, get_previous_patch(current_patch_full), {}
 
         # Find matching patch
@@ -153,20 +153,20 @@ def check_patch_viability(current_patch_full):
             if riot_version == current_patch_short:
                 days_since_release = (datetime.now() - wiki_patch['release_date']).days
 
-                print(f"✅ Found matching patch {wiki_patch['title']} -> {riot_version}")
-                print(f"   Released: {wiki_patch['release_date'].strftime('%Y-%m-%d')}")
-                print(f"   Days since release: {days_since_release}")
+                _logger.info(f"Found matching patch {wiki_patch['title']} -> {riot_version}")
+                _logger.info(f"Released: {wiki_patch['release_date'].strftime('%Y-%m-%d')}")
+                _logger.info(f"Days since release: {days_since_release}")
 
                 # Use current patch if released more than 4 days ago
                 if days_since_release >= 4:
-                    print("✅ Patch is viable for scraping")
+                    _logger.info("Patch is viable for scraping")
                     return True, current_patch_full, {
                         'days_since_release': days_since_release,
                         'release_date': wiki_patch['release_date'],
                         'wiki_title': wiki_patch['title']
                     }
                 else:
-                    print(f"⚠️ Patch too new ({days_since_release} days), falling back")
+                    _logger.warning(f"Patch too new ({days_since_release} days), falling back")
                     return False, get_previous_patch(current_patch_full), {
                         'days_since_release': days_since_release,
                         'release_date': wiki_patch['release_date'],
@@ -174,31 +174,31 @@ def check_patch_viability(current_patch_full):
                     }
 
         # Patch not found on wiki
-        print(f"⚠️ Patch {current_patch_short} not found on Wiki, falling back")
+        _logger.warning(f"Patch {current_patch_short} not found on Wiki, falling back")
         return False, get_previous_patch(current_patch_full), {'reason': 'patch_not_on_wiki'}
 
     except Exception as e:
-        print(f"❌ Error checking patch viability: {e}")
+        _logger.error(f"Error checking patch viability: {e}")
         import traceback
         traceback.print_exc()
         return False, get_previous_patch(current_patch_full), {'error': str(e)}
 
 def scrape_and_store_data():
     """Main function to scrape data and store in Firebase"""
-    print("Starting data scraping...")
+    _logger.info("Starting data scraping...")
 
     # Get current patch and check viability
     current_patch = get_current_patch()
-    print(f"Current patch: {current_patch}")
+    _logger.info(f"Current patch: {current_patch}")
 
     # Check if current patch has sufficient sample size
     use_current, target_patch, viability_metrics = check_patch_viability(current_patch)
 
     if use_current:
-        print(f"✅ Using current patch {current_patch} for scraping")
+        _logger.info(f"Using current patch {current_patch} for scraping")
     else:
-        print(f"⚠️ Current patch {current_patch} has insufficient data")
-        print(f"🔄 Falling back to patch {target_patch}")
+        _logger.warning(f"Current patch {current_patch} has insufficient data")
+        _logger.info(f"Falling back to patch {target_patch}")
 
     champions = get_champion_list()
 
@@ -211,15 +211,15 @@ def scrape_and_store_data():
             champion_image_name = get_champion_image_name(champion_internal)
             simplified_key = get_simplified_key(champion_internal)
 
-            print(f"\n=== Processing {champion_internal} (display: {champion_display}, key: {simplified_key}) ===")
+            _logger.info(f"Processing {champion_internal} (display: {champion_display}, key: {simplified_key})")
 
             # Scrape League Wiki abilities data
-            print(f"Scraping wiki abilities for {champion_display}...")
+            _logger.info(f"Scraping wiki abilities for {champion_display}...")
             abilities_data = scrape_champion_abilities(champion_display)
-            print(f"Found {len(abilities_data)} abilities")
+            _logger.info(f"Found {len(abilities_data)} abilities")
 
             # Scrape Lolalytics build data with target patch
-            print(f"Scraping lolalytics data for {champion_display} (patch {target_patch})...")
+            _logger.info(f"Scraping lolalytics data for {champion_display} (patch {target_patch})...")
             lolalytics_scraper = LolalyticsBuildScraper()
             normalized_patch = normalize_patch_for_lolalytics(target_patch)
             build_data = lolalytics_scraper.scrape_champion_build(champion_display, patch=normalized_patch)
@@ -239,28 +239,28 @@ def scrape_and_store_data():
                 for key, value in build_data.items():
                     if key != 'tier':  # Skip the tier field
                         combined_data[key] = value
-                print(f"Combined data: {len(build_data.get('roles', {}))} roles")
+                _logger.info(f"Combined data: {len(build_data.get('roles', {}))} roles")
             else:
-                print("No build data available")
+                _logger.info("No build data available")
 
             # Store combined data using internal key (remove /data subdocument)
             store_combined_champion_data(champion_internal, combined_data)
-            print(f"✅ Successfully stored data for {champion_display} (key: {champion_internal})")
+            _logger.info(f"Successfully stored data for {champion_display} (key: {champion_internal})")
 
         except Exception as e:
-            print(f"❌ Error processing {champion_internal}: {e}")
+            _logger.error(f"Error processing {champion_internal}: {e}")
             import traceback
             traceback.print_exc()
 
     # Update role containers for optimized queries
-    print("\n🔄 Updating role containers...")
+    _logger.info("Updating role containers...")
     update_role_containers()
 
     # Clean up old patch data to save space
-    print("\n🧹 Cleaning up old patch data...")
+    _logger.info("Cleaning up old patch data...")
     cleanup_old_patch_data()
 
-    print("\n🎉 Data scraping, optimization, and cleanup completed!")
+    _logger.info("Data scraping, optimization, and cleanup completed!")
 
 class SmartUpdateEngine:
     """Intelligent update system for champion data"""

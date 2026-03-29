@@ -11,6 +11,10 @@ from typing import Dict, List, Optional, Tuple
 from urllib.parse import quote
 import re
 
+from .logging_utils import get_logger
+
+_logger = get_logger(__name__)
+
 
 class RiotAPIClient:
     """Client for Riot Games API with caching"""
@@ -46,7 +50,7 @@ class RiotAPIClient:
             self._set_cached("versions", versions)
             return versions
         except Exception as e:
-            print(f"Error fetching versions: {e}")
+            _logger.error(f"Error fetching versions: {e}")
             return []
 
     def get_current_patch(self) -> str:
@@ -71,7 +75,7 @@ class RiotAPIClient:
             self._set_cached(cache_key, data)
             return data
         except Exception as e:
-            print(f"Error fetching champion data: {e}")
+            _logger.error(f"Error fetching champion data: {e}")
             return {}
 
 

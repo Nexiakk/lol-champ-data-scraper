@@ -9,6 +9,10 @@ from typing import Dict, List, Optional, Any
 from datetime import datetime
 import libsql_experimental as libsql
 
+from .logging_utils import get_logger
+
+_logger = get_logger(__name__)
+
 class TursoConfig:
     """Configuration for Turso connection"""
     def __init__(self, db_url: Optional[str] = None, auth_token: Optional[str] = None):
@@ -40,7 +44,7 @@ class TursoManager:
             conn.close()
             return True
         except Exception as e:
-            print(f"Turso initialization failed: {e}")
+            _logger.error(f"Turso initialization failed: {e}")
             return False
 
     def get_champion_data(self, champion_key: str) -> Optional[Dict[str, Any]]:
@@ -66,7 +70,7 @@ class TursoManager:
                 "abilities": abilities
             }
         except Exception as e:
-            print(f"Error getting champion data for {champion_key}: {e}")
+            _logger.error(f"Error getting champion data for {champion_key}: {e}")
             return None
         finally:
             if conn:
@@ -97,7 +101,7 @@ class TursoManager:
             conn.commit()
             return True
         except Exception as e:
-            print(f"Error storing champion data for {champion_key}: {e}")
+            _logger.error(f"Error storing champion data for {champion_key}: {e}")
             return False
         finally:
             if conn:
@@ -117,7 +121,7 @@ class TursoManager:
                 result["patch"] = row[2] # just grab the last one
             return result
         except Exception as e:
-            print(f"Error getting role containers: {e}")
+            _logger.error(f"Error getting role containers: {e}")
             return None
         finally:
             if conn:
@@ -144,7 +148,7 @@ class TursoManager:
             conn.commit()
             return True
         except Exception as e:
-            print(f"Error updating role containers: {e}")
+            _logger.error(f"Error updating role containers: {e}")
             return False
         finally:
             if conn:
@@ -166,7 +170,7 @@ class TursoManager:
                 }
             return None
         except Exception as e:
-            print(f"Error getting global patch info: {e}")
+            _logger.error(f"Error getting global patch info: {e}")
             return None
         finally:
             if conn:
@@ -207,7 +211,7 @@ class TursoManager:
             conn.commit()
             return True
         except Exception as e:
-            print(f"Error updating global patch info: {e}")
+            _logger.error(f"Error updating global patch info: {e}")
             return False
         finally:
             if conn:

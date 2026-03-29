@@ -8,6 +8,10 @@ import re
 from typing import List, Dict, Optional, Any
 from urllib.parse import quote
 
+from .logging_utils import get_logger
+
+_logger = get_logger(__name__)
+
 
 def encode_champion_name_for_wiki(champion_name: str) -> str:
     """Encode champion name for League Wiki URL format."""
@@ -115,6 +119,79 @@ def extract_ability_name(skill_div) -> Optional[str]:
     return None
 
 
+def extract_icon_url(skill_div, champion_name: str) -> Optional[str]:
+    """
+    Extract ability icon URL from skill div.
+    Returns full URL to the ability icon image.
+    """
+    # Get ability name to construct expected image filename
+    ability_name = extract_ability_name(skill_div)
+    if not ability_name:
+        return None
+    
+    # Look for images that match the ability name pattern
+    imgs = skill_div.find_all('img')
+    for img in imgs:
+        src = img.get('src', '')
+        # Check if this is an ability icon (not a thumbnail)
+        if '/thumb/' not in src and champion_name.replace(' ', '_') in src:
+            # Convert relative URL to full URL
+            if src.startswith('/'):
+                return f"https://wiki.leagueoflegends.com{src}"
+            elif src.startswith('http'):
+                return src
+    
+    # Fallback: Try to find by ability name pattern
+    champion_encoded = champion_name.replace(' ', '_')
+    ability_encoded = ability_name.replace(' ', '_')
+    for img in imgs:
+        src = img.get('src', '')
+        if champion_encoded in src and ability_encoded in src and '/thumb/' not in src:
+            if src.startswith('/'):
+                return f"https://wiki.leagueoflegends.com{src}"
+            elif src.startswith('http'):
+                return src
+    
+    return None
+
+
+def extract_description(skill_div) -> Optional[str]:
+    """
+    Extract ability description from skill div.
+    Returns the full description text.
+    """
+    # Look for the ability-info-content div
+    content_div = skill_div.find('div', class_='ability-info-content')
+    if content_div:
+        # Get the full text content
+        description = content_div.get_text(strip=True)
+        if description:
+            return description
+    
+    return None
+
+
+def clean_cooldown(cooldown: str) -> str:
+    """
+    Clean and standardize cooldown string.
+    
+    - Removes parenthetical annotations like "(based on level)"
+    - Standardizes spacing around "/" separators to no spaces
+    - Preserves range formats like "X – Y" (attack speed scaling)
+    """
+    # Remove parenthetical annotations (e.g., "(based on level)", "(based onbonusattack speed)")
+    cleaned = re.sub(r'\([^)]*\)', '', cooldown)
+    
+    # Standardize spacing around "/" separators
+    # First, normalize any existing spacing around "/"
+    cleaned = re.sub(r'\s*/\s*', '/', cleaned)
+    
+    # Clean up any extra whitespace
+    cleaned = cleaned.strip()
+    
+    return cleaned
+
+
 def extract_cooldown(skill_div) -> Optional[str]:
     """Extract cooldown from ability container."""
     # Look for ability-info-stats__stat elements
@@ -131,7 +208,7 @@ def extract_cooldown(skill_div) -> Optional[str]:
                 # Clean up cooldown string
                 cooldown = re.sub(r'\s*seconds?\s*$', '', cooldown, flags=re.I)
                 if cooldown and cooldown not in ['.', '']:
-                    return cooldown
+                    return clean_cooldown(cooldown)
 
     # Fallback: Search text for cooldown patterns
     text = skill_div.get_text()
@@ -139,7 +216,7 @@ def extract_cooldown(skill_div) -> Optional[str]:
     if cooldown_match:
         cooldown = cooldown_match.group(1).strip()
         if cooldown and cooldown not in ['.', '']:
-            return cooldown
+            return clean_cooldown(cooldown)
 
     return None
 
@@ -199,6 +276,8 @@ def extract_ability_data(skill_div, champion_name: str) -> Optional[Dict[str, An
 
     cooldown = extract_cooldown(skill_div)
     cost = extract_cost(skill_div)
+    icon = extract_icon_url(skill_div, champion_name)
+    description = extract_description(skill_div)
 
     ability = {
         'name': name,
@@ -212,6 +291,14 @@ def extract_ability_data(skill_div, champion_name: str) -> Optional[Dict[str, An
     # Only include cost if it exists
     if cost:
         ability['cost'] = cost
+
+    # Only include icon if it exists
+    if icon:
+        ability['icon'] = icon
+
+    # Only include description if it exists
+    if description:
+        ability['description'] = description
 
     return ability
 
@@ -397,7 +484,7 @@ def scrape_champion_abilities(champion_display_name: str) -> List[Dict[str, Any]
         return flat_abilities
 
     except Exception as e:
-        print(f"Error scraping {champion_display_name}: {e}")
+        _logger.error(f"Error scraping {champion_display_name}: {e}")
         return []
 
 
@@ -416,7 +503,7 @@ def scrape_champion_abilities_with_forms(champion_display_name: str) -> Dict[str
         return scrape_champion_abilities_from_html(response.text, champion_display_name)
 
     except Exception as e:
-        print(f"Error scraping {champion_display_name}: {e}")
+        _logger.error(f"Error scraping {champion_display_name}: {e}")
         return {'forms': [], 'hasMultipleForms': False, 'totalAbilities': 0}
 
 
@@ -448,4 +535,10 @@ if __name__ == '__main__':
                     cost_str = ""
                     if ability.get('cost'):
                         cost_str = f" [{ability['cost']['value']} {ability['cost']['resource']}]"
-                    print(f"    - {ability['type']}: {ability['name']}{cooldown_str}{cost_str}")
+                    icon_str = ""
+                    if ability.get('icon'):
+                        icon_str = f" [Icon: {ability['icon'][:50]}...]"
+                    desc_str = ""
+                    if ability.get('description'):
+                        desc_str = f"\n      Description: {ability['description'][:100]}..."
+                    print(f"    - {ability['type']}: {ability['name']}{cooldown_str}{cost_str}{icon_str}{desc_str}")

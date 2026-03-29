@@ -35,8 +35,7 @@ sys.path.append(os.path.join(os.path.dirname(__file__), 'scraper'))
 
 from scraper.lolalytics_build_scraper import LolalyticsBuildScraper
 from scraper.wiki_scraper import scrape_champion_abilities
-from scraper.main import (
-    check_patch_viability,
+from scraper.utils import (
     normalize_patch_for_lolalytics,
     get_display_name,
     get_champion_id,
@@ -45,63 +44,37 @@ from scraper.main import (
     get_champion_list,
     get_current_patch
 )
+from scraper.turso_utils import TursoManager, TursoConfig
+from scraper.logging_utils import get_logger
 
-# Firebase imports (optional - will work without Firebase for testing)
-try:
-    import firebase_admin
-    from firebase_admin import credentials, firestore
-    FIREBASE_AVAILABLE = True
-except ImportError:
-    FIREBASE_AVAILABLE = False
-    print("⚠️ Firebase not available - running in offline mode")
+_logger = get_logger(__name__)
 
 class ManualScraper:
     """Manual champion scraper for local execution"""
 
     def __init__(self):
-        self.db = None
+        self.turso = None
         self.scraper = LolalyticsBuildScraper()
+        self._init_turso()
 
-        # Initialize Firebase if available and credentials exist
-        if FIREBASE_AVAILABLE:
-            self._init_firebase()
-
-    def _init_firebase(self):
-        """Initialize Firebase connection"""
+    def _init_turso(self):
+        """Initialize Turso connection"""
         try:
-            if not firebase_admin._apps:
-                # Try environment variable first (GitHub Actions/serverless)
-                cred_json = os.environ.get('FIREBASE_SERVICE_ACCOUNT_KEY')
-                if cred_json:
-                    cred = credentials.Certificate(json.loads(cred_json))
-                else:
-                    # Try local files
-                    cred_paths = [
-                        'firebase-key.json',
-                        os.path.join(os.path.dirname(__file__), 'firebase-key.json'),
-                        os.path.join(os.path.dirname(__file__), '..', 'firebase-key.json')
-                    ]
-
-                    cred = None
-                    for path in cred_paths:
-                        if os.path.exists(path):
-                            cred = credentials.Certificate(path)
-                            break
-
-                    if not cred:
-                        print("⚠️ No Firebase credentials found - running in offline mode")
-                        return
-
-                firebase_admin.initialize_app(cred)
-                self.db = firestore.client()
-                print("✅ Firebase initialized")
+            config = TursoConfig()
+            self.turso = TursoManager(config)
+            if self.turso.initialize():
+                _logger.info("Turso initialized successfully")
+            else:
+                _logger.warning("Turso initialization failed - running in offline mode")
+                self.turso = None
         except Exception as e:
-            print(f"⚠️ Firebase initialization failed: {e} - running in offline mode")
+            _logger.warning(f"Turso initialization failed: {e} - running in offline mode")
+            self.turso = None
 
     def get_missing_champions(self):
         """Get champions that are not in the database"""
-        if not self.db:
-            print("❌ Cannot check missing champions without Firebase")
+        if not self.turso:
+            _logger.error("Cannot check missing champions without Turso")
             return []
 
         try:
@@ -110,19 +83,19 @@ class ManualScraper:
 
             # Get champions already in database
             existing_champions = set()
-            if self.db:
-                champions_ref = self.db.collection('champions').document('data').collection('champions')
-                existing_docs = champions_ref.stream()
-                existing_champions = {doc.id for doc in existing_docs}
+            for champ in all_champions:
+                data = self.turso.get_champion_data(champ)
+                if data:
+                    existing_champions.add(champ)
 
             # Find missing champions
             missing = [champ for champ in all_champions if champ not in existing_champions]
 
-            print(f"Found {len(missing)} missing champions out of {len(all_champions)} total")
+            _logger.info(f"Found {len(missing)} missing champions out of {len(all_champions)} total")
             return missing
 
         except Exception as e:
-            print(f"❌ Error checking missing champions: {e}")
+            _logger.error(f"Error checking missing champions: {e}")
             return []
 
     def scrape_champion(self, champion_internal, target_patch=None, dry_run=False):
@@ -166,8 +139,8 @@ class ManualScraper:
             else:
                 print("⚠️ No build data available")
 
-            # Store in Firebase if available
-            if self.db:
+            # Store in Turso if available
+            if self.turso:
                 self._store_champion_data(champion_internal, combined_data)
 
             return True
@@ -179,29 +152,28 @@ class ManualScraper:
             return False
 
     def _store_champion_data(self, champion_key, data):
-        """Store champion data in Firebase"""
+        """Store champion data in Turso"""
         try:
-            doc_ref = self.db.collection('champions').document('data').collection('champions').document(champion_key)
-            doc_ref.set(data)
-            print(f"💾 Stored data for {champion_key}")
+            success = self.turso.store_champion_data(champion_key, data)
+            if success:
+                _logger.info(f"Stored data for {champion_key}")
+            else:
+                _logger.error(f"Failed to store data for {champion_key}")
         except Exception as e:
-            print(f"❌ Error storing data for {champion_key}: {e}")
+            _logger.error(f"Error storing data for {champion_key}: {e}")
 
     def update_role_containers(self):
         """Update role containers after manual scraping"""
-        if not self.db:
-            print("⚠️ Cannot update role containers without Firebase")
+        if not self.turso:
+            _logger.warning("Cannot update role containers without Turso")
             return
 
         try:
-            print("\n🔄 Updating role containers...")
-
-            # Import the update function from lambda_function
+            _logger.info("Updating role containers...")
             from lambda_function import update_role_containers
             update_role_containers()
-
         except Exception as e:
-            print(f"❌ Error updating role containers: {e}")
+            _logger.error(f"Error updating role containers: {e}")
 
 def main():
     parser = argparse.ArgumentParser(
@@ -263,7 +235,7 @@ def main():
                     break
 
             if not matched:
-                print(f"⚠️ Champion '{champ_input}' not found, skipping")
+                _logger.warning(f"Champion '{champ_input}' not found, skipping")
 
         if not champions_to_scrape:
             print("❌ No valid champions specified")

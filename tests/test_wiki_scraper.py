@@ -12,7 +12,10 @@ from scraper.wiki_scraper import (
     extract_cooldown,
     extract_cost,
     extract_ability_name,
-    extract_skill_type
+    extract_skill_type,
+    clean_cooldown,
+    extract_icon_url,
+    extract_description
 )
 
 
@@ -258,7 +261,7 @@ class TestCooldownDisplay(unittest.TestCase):
         skill_div = soup.find('div', class_='skill_q')
         cooldown = extract_cooldown(skill_div)
 
-        self.assertEqual(cooldown, '10 / 9 / 8 / 7 / 6')
+        self.assertEqual(cooldown, '10/9/8/7/6')
 
     def test_no_cooldown_for_passive(self):
         """Passives may not have cooldown - should return None."""
@@ -272,6 +275,162 @@ class TestCooldownDisplay(unittest.TestCase):
         cooldown = extract_cooldown(skill_div)
 
         self.assertIsNone(cooldown)
+
+
+class TestCleanCooldown(unittest.TestCase):
+    """Test cooldown cleaning and standardization."""
+
+    def test_remove_parenthetical_annotations(self):
+        """Should remove parenthetical annotations like (based on level)."""
+        self.assertEqual(clean_cooldown('22 – 8.59(based on level)'), '22 – 8.59')
+        self.assertEqual(clean_cooldown('4 – 1.33(based onbonusattack speed)'), '4 – 1.33')
+        self.assertEqual(clean_cooldown('10(something)'), '10')
+
+    def test_standardize_slash_spacing(self):
+        """Should standardize spacing around / separators."""
+        self.assertEqual(clean_cooldown('14 / 12 / 10 / 8 / 6'), '14/12/10/8/6')
+        self.assertEqual(clean_cooldown('13 / 11.4/ 9.8/ 8.2/ 6.6/ 5'), '13/11.4/9.8/8.2/6.6/5')
+        self.assertEqual(clean_cooldown('0.5/ 0.4/ 0.3/ 0.2/ 0.1'), '0.5/0.4/0.3/0.2/0.1')
+        self.assertEqual(clean_cooldown('10 / 9 / 8 / 7 / 6'), '10/9/8/7/6')
+
+    def test_preserve_range_formats(self):
+        """Should preserve range formats like X – Y."""
+        self.assertEqual(clean_cooldown('22 – 8.59'), '22 – 8.59')
+        self.assertEqual(clean_cooldown('4 – 1.33'), '4 – 1.33')
+
+    def test_combined_cleaning(self):
+        """Should handle combined issues."""
+        self.assertEqual(clean_cooldown('22 – 8.59(based on level)'), '22 – 8.59')
+        self.assertEqual(clean_cooldown('4 – 1.33(based onbonusattack speed)'), '4 – 1.33')
+        self.assertEqual(clean_cooldown('14 / 12 / 10 / 8 / 6'), '14/12/10/8/6')
+
+    def test_clean_strings(self):
+        """Should pass through already clean strings."""
+        self.assertEqual(clean_cooldown('10/9/8/7/6'), '10/9/8/7/6')
+        self.assertEqual(clean_cooldown('22 – 8.59'), '22 – 8.59')
+        self.assertEqual(clean_cooldown('120/100/80'), '120/100/80')
+
+
+class TestCooldownCleaningIntegration(unittest.TestCase):
+    """Test that cooldown cleaning is properly integrated."""
+
+    def setUp(self):
+        """Load test fixtures."""
+        self.fixtures_dir = os.path.join(os.path.dirname(__file__), 'fixtures')
+
+    def test_aatrox_passive_cooldown(self):
+        """Aatrox passive should have cleaned cooldown."""
+        fixture_path = os.path.join(self.fixtures_dir, 'aatrox.html')
+        with open(fixture_path, 'r', encoding='utf-8') as f:
+            html = f.read()
+
+        result = scrape_champion_abilities_from_html(html, 'Aatrox')
+        passive = next((a for a in result['forms'][0]['abilities'] if a['type'] == 'Passive'), None)
+        
+        self.assertIsNotNone(passive)
+        self.assertEqual(passive['cooldown'], '22 – 8.59')
+        self.assertNotIn('(based on level)', passive['cooldown'])
+
+    def test_yasuo_q_cooldown(self):
+        """Yasuo Q should have cleaned cooldown."""
+        fixture_path = os.path.join(self.fixtures_dir, 'yasuo.html')
+        with open(fixture_path, 'r', encoding='utf-8') as f:
+            html = f.read()
+
+        result = scrape_champion_abilities_from_html(html, 'Yasuo')
+        q_ability = next((a for a in result['forms'][0]['abilities'] if a['type'] == 'Q'), None)
+        
+        self.assertIsNotNone(q_ability)
+        self.assertEqual(q_ability['cooldown'], '4 – 1.33')
+        self.assertNotIn('(based onbonusattack speed)', q_ability['cooldown'])
+
+    def test_standard_cooldown_formatting(self):
+        """Standard cooldowns should have no spaces around slashes."""
+        fixture_path = os.path.join(self.fixtures_dir, 'aatrox.html')
+        with open(fixture_path, 'r', encoding='utf-8') as f:
+            html = f.read()
+
+        result = scrape_champion_abilities_from_html(html, 'Aatrox')
+        q_ability = next((a for a in result['forms'][0]['abilities'] if a['type'] == 'Q'), None)
+        
+        self.assertIsNotNone(q_ability)
+        self.assertEqual(q_ability['cooldown'], '14/12/10/8/6')
+
+
+class TestIconAndDescriptionExtraction(unittest.TestCase):
+    """Test icon URL and description extraction."""
+
+    def setUp(self):
+        """Load test fixtures."""
+        self.fixtures_dir = os.path.join(os.path.dirname(__file__), 'fixtures')
+        self.champions = {}
+
+        for champ in ['Jayce', 'Aatrox']:
+            fixture_path = os.path.join(self.fixtures_dir, f'{champ.lower()}.html')
+            if os.path.exists(fixture_path):
+                with open(fixture_path, 'r', encoding='utf-8') as f:
+                    self.champions[champ] = BeautifulSoup(f.read(), 'html.parser')
+
+    def test_extract_icon_url_jayce(self):
+        """Should extract icon URL for Jayce abilities."""
+        soup = self.champions['Jayce']
+        skill_div = soup.find('div', class_='skill_q')
+        
+        icon_url = extract_icon_url(skill_div, 'Jayce')
+        
+        self.assertIsNotNone(icon_url)
+        self.assertTrue(icon_url.startswith('https://wiki.leagueoflegends.com/en-us/images/'))
+        self.assertIn('Jayce', icon_url)
+
+    def test_extract_icon_url_aatrox(self):
+        """Should extract icon URL for Aatrox abilities."""
+        soup = self.champions['Aatrox']
+        skill_div = soup.find('div', class_='skill_q')
+        
+        icon_url = extract_icon_url(skill_div, 'Aatrox')
+        
+        self.assertIsNotNone(icon_url)
+        self.assertTrue(icon_url.startswith('https://wiki.leagueoflegends.com/en-us/images/'))
+        self.assertIn('Aatrox', icon_url)
+
+    def test_extract_description_jayce(self):
+        """Should extract description for Jayce abilities."""
+        soup = self.champions['Jayce']
+        skill_div = soup.find('div', class_='skill_q')
+        
+        description = extract_description(skill_div)
+        
+        self.assertIsNotNone(description)
+        self.assertIsInstance(description, str)
+        self.assertGreater(len(description), 50)  # Description should be substantial
+
+    def test_extract_description_aatrox(self):
+        """Should extract description for Aatrox abilities."""
+        soup = self.champions['Aatrox']
+        skill_div = soup.find('div', class_='skill_q')
+        
+        description = extract_description(skill_div)
+        
+        self.assertIsNotNone(description)
+        self.assertIsInstance(description, str)
+        self.assertGreater(len(description), 50)  # Description should be substantial
+
+    def test_icon_and_description_in_extracted_ability(self):
+        """Icon and description should be included in extracted ability data."""
+        soup = self.champions['Jayce']
+        abilities = extract_all_abilities(soup, 'Jayce')
+        
+        # Find an ability with icon and description
+        ability_with_data = next(
+            (a for a in abilities if a.get('icon') and a.get('description')), 
+            None
+        )
+        
+        self.assertIsNotNone(ability_with_data)
+        self.assertIn('icon', ability_with_data)
+        self.assertIn('description', ability_with_data)
+        self.assertTrue(ability_with_data['icon'].startswith('https://'))
+        self.assertIsInstance(ability_with_data['description'], str)
 
 
 if __name__ == '__main__':

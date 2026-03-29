@@ -6,6 +6,9 @@ import time
 from typing import Dict, List, Optional
 
 from .utils import get_internal_key_from_lolalytics
+from .logging_utils import get_logger
+
+_logger = get_logger(__name__)
 
 def encode_champion_name_for_lolalytics(display_name):
     """Encode champion name for Lolalytics URL format (simplified, no special chars/spaces)"""
@@ -44,7 +47,7 @@ class LolalyticsBuildScraper:
         if patch:
             params.append(f"patch={patch}")
         url = base_url + "?" + "&".join(params)
-        print(f"Fetching roles from: {url}")
+        _logger.info(f"Fetching roles from: {url}")
 
         try:
             response = self.session.get(url, timeout=15)
@@ -54,7 +57,7 @@ class LolalyticsBuildScraper:
             # Find the roles container
             roles_container = soup.find('div', class_='flex h-[51px] w-[197px] gap-[3px] pt-[3px]')
             if not roles_container:
-                print("Could not find roles container")
+                _logger.warning("Could not find roles container")
                 return []
 
             valid_roles = []
@@ -84,7 +87,7 @@ class LolalyticsBuildScraper:
             return valid_roles
 
         except Exception as e:
-            print(f"Error getting roles for {champion}: {e}")
+            _logger.error(f"Error getting roles for {champion}: {e}")
             return []
 
     def get_role_stats(self, champion: str, role: str, tier: str = "d2_plus", patch: str = None) -> Dict:
@@ -99,7 +102,7 @@ class LolalyticsBuildScraper:
             params.append(f"lane={role}")
             params.append(f"tier={tier}")
         url = base_url + "?" + "&".join(params)
-        print(f"Fetching stats for {champion} {role}: {url}")
+        _logger.info(f"Fetching stats for {champion} {role}: {url}")
 
         try:
             response = self.session.get(url, timeout=15)
@@ -158,7 +161,7 @@ class LolalyticsBuildScraper:
             return stats
 
         except Exception as e:
-            print(f"Error getting stats for {champion} {role}: {e}")
+            _logger.error(f"Error getting stats for {champion} {role}: {e}")
             return {}
 
     def get_role_stats_from_url(self, champion: str, role_url: str, tier: str = "d2_plus", patch: str = None) -> Dict:
@@ -166,7 +169,7 @@ class LolalyticsBuildScraper:
         # Ensure we have a full URL
         if role_url.startswith('/'):
             role_url = self.base_url + role_url
-        print(f"Fetching stats from URL: {role_url}")
+        _logger.info(f"Fetching stats from URL: {role_url}")
 
         try:
             response = self.session.get(role_url, timeout=15)
@@ -225,7 +228,7 @@ class LolalyticsBuildScraper:
             return stats
 
         except Exception as e:
-            print(f"Error getting stats from URL {role_url}: {e}")
+            _logger.error(f"Error getting stats from URL {role_url}: {e}")
             return {}
 
     def determine_main_role_from_url(self, champion: str, role_url: str, tier: str = "d2_plus", patch: str = None) -> str:
@@ -282,11 +285,11 @@ class LolalyticsBuildScraper:
                     return lane_match.group(1)
 
             # If all else fails, assume top (most common default)
-            print(f"Could not determine main role for {champion}, defaulting to 'top'")
+            _logger.warning(f"Could not determine main role for {champion}, defaulting to 'top'")
             return 'top'
 
         except Exception as e:
-            print(f"Error determining main role from URL {full_url}: {e}")
+            _logger.error(f"Error determining main role from URL {full_url}: {e}")
             return 'top'  # Safe default
 
     def get_counter_matchups(self, champion: str, role: str, tier: str = "d2_plus", patch: str = None) -> List[Dict]:
@@ -355,12 +358,12 @@ class LolalyticsBuildScraper:
             return counters
 
         except Exception as e:
-            print(f"Error getting counters for {champion} {role}: {e}")
+            _logger.error(f"Error getting counters for {champion} {role}: {e}")
             return []
 
     def scrape_champion_build(self, champion_display_name: str, tier: str = "d2_plus", patch: str = None) -> Dict:
         """Main method to scrape all champion build data - returns flattened structure"""
-        print(f"\n=== Scraping {champion_display_name} build data ===")
+        _logger.info(f"Scraping {champion_display_name} build data")
 
         # Encode champion name for Lolalytics URL
         encoded_champion = encode_champion_name_for_lolalytics(champion_display_name)
@@ -368,7 +371,7 @@ class LolalyticsBuildScraper:
         # Get valid roles
         roles = self.get_champion_roles(encoded_champion, tier, patch)
         if not roles:
-            print(f"No valid roles found for {champion_display_name}")
+            _logger.warning(f"No valid roles found for {champion_display_name}")
             return {}
 
         result = {
@@ -385,7 +388,7 @@ class LolalyticsBuildScraper:
                 role_name = role_info
                 role_url = None
 
-            print(f"\n--- Processing role: {role_name} ---")
+            _logger.info(f"Processing role: {role_name}")
 
             # Get stats for this role
             if role_url and 'lane=' not in role_url:
@@ -406,8 +409,8 @@ class LolalyticsBuildScraper:
                 'counters': counters
             }
 
-            # Rate limiting
-            time.sleep(1)
+            # Rate limiting (reduced for parallel processing)
+            time.sleep(0.5)
 
         return result
 
