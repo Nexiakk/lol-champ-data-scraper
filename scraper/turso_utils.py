@@ -8,14 +8,67 @@ import os
 import json
 import time
 import threading
+import socket
 from typing import Dict, List, Optional, Any
 from datetime import datetime
 from queue import Queue, Empty
+from urllib.parse import urlparse
 import libsql_experimental as libsql
 
 from .logging_utils import get_logger
 
 _logger = get_logger(__name__)
+
+
+def check_turso_connectivity(db_url: str, timeout: int = 5) -> bool:
+    """
+    Check if Turso database endpoint is reachable.
+    
+    Args:
+        db_url: Turso database URL
+        timeout: Connection timeout in seconds
+        
+    Returns:
+        True if reachable, False otherwise
+    """
+    try:
+        # Parse the URL to extract host and port
+        parsed = urlparse(db_url)
+        host = parsed.hostname
+        port = parsed.port or 443  # Default to HTTPS port
+        
+        if not host:
+            _logger.error(f"Could not parse host from URL: {db_url[:50]}...")
+            return False
+        
+        _logger.debug(f"Checking connectivity to {host}:{port}...")
+        
+        # Try to establish a socket connection
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(timeout)
+        
+        try:
+            result = sock.connect_ex((host, port))
+            sock.close()
+            
+            if result == 0:
+                _logger.debug(f"Successfully connected to {host}:{port}")
+                return True
+            else:
+                _logger.warning(f"Could not connect to {host}:{port} (error code: {result})")
+                return False
+        except socket.timeout:
+            _logger.warning(f"Connection to {host}:{port} timed out after {timeout}s")
+            sock.close()
+            return False
+        except Exception as e:
+            _logger.warning(f"Connection check failed: {e}")
+            sock.close()
+            return False
+            
+    except Exception as e:
+        _logger.error(f"Error checking Turso connectivity: {e}")
+        return False
 
 
 class ConnectionPool:
@@ -238,11 +291,18 @@ class TursoManager:
             self._pool.release_connection(conn)
 
     def initialize(self) -> bool:
-        """Validate Turso Connection"""
+        """Validate Turso Connection with network connectivity check"""
+        # Check network connectivity before attempting connection
+        if not check_turso_connectivity(self.config.db_url):
+            _logger.error("Turso database is unreachable - check network connectivity")
+            return False
+        
         conn = None
         try:
+            _logger.info("Network connectivity check passed, attempting database connection...")
             conn = self._get_conn()
             conn.execute("SELECT 1")
+            _logger.info("Database connection initialized successfully")
             return True
         except Exception as e:
             _logger.error(f"Turso initialization failed: {e}")
