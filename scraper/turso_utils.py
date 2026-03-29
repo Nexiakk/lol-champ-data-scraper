@@ -90,43 +90,45 @@ class ConnectionPool:
         
     def _create_connection(self):
         """Create a new database connection with timeout handling"""
-        import concurrent.futures
+        import threading
         
         _logger.info(f"Attempting to create database connection...")
         
+        result = {'conn': None, 'error': None, 'completed': False}
+        
         def _connect():
             """Inner function to create connection"""
-            _logger.debug(f"Connecting to {self.db_url[:50]}...")
-            conn = libsql.connect(self.db_url, auth_token=self.auth_token)
-            _logger.debug("Connection established successfully")
-            return conn
-        
-        executor = None
-        try:
-            # Use ThreadPoolExecutor to add timeout to connection creation
-            # libsql.connect() can hang indefinitely if network is unavailable
-            executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
-            future = executor.submit(_connect)
             try:
-                # Wait up to 30 seconds for connection (increased from 10s)
-                _logger.debug("Waiting for connection (timeout: 30s)...")
-                conn = future.result(timeout=30)
-                with self._lock:
-                    self._created_count += 1
-                    self._active_connections += 1
-                _logger.info(f"Successfully created database connection (total created: {self._created_count})")
-                return conn
-            except concurrent.futures.TimeoutError:
-                _logger.error("Connection creation timed out after 30 seconds - Turso may be unreachable")
-                raise TimeoutError("Database connection timed out after 30 seconds - check network connectivity to Turso")
-        except Exception as e:
-            _logger.error(f"Failed to create database connection: {type(e).__name__}: {e}")
-            raise
-        finally:
-            if executor:
-                # Don't wait for pending futures - just shutdown immediately
-                # This prevents the executor from hanging when libsql.connect() blocks
-                executor.shutdown(wait=False)
+                _logger.debug(f"Connecting to {self.db_url[:50]}...")
+                conn = libsql.connect(self.db_url, auth_token=self.auth_token)
+                _logger.debug("Connection established successfully")
+                result['conn'] = conn
+                result['completed'] = True
+            except Exception as e:
+                result['error'] = e
+                result['completed'] = True
+        
+        # Start connection in a daemon thread
+        thread = threading.Thread(target=_connect, daemon=True)
+        thread.start()
+        
+        # Wait for completion with timeout
+        thread.join(timeout=30)
+        
+        if not result['completed']:
+            _logger.error("Connection creation timed out after 30 seconds - Turso may be unreachable")
+            raise TimeoutError("Database connection timed out after 30 seconds - check network connectivity to Turso")
+        
+        if result['error']:
+            _logger.error(f"Failed to create database connection: {type(result['error']).__name__}: {result['error']}")
+            raise result['error']
+        
+        with self._lock:
+            self._created_count += 1
+            self._active_connections += 1
+        
+        _logger.info(f"Successfully created database connection (total created: {self._created_count})")
+        return result['conn']
         
     def get_connection(self):
         """
