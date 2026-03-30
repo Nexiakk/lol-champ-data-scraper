@@ -163,8 +163,8 @@ def extract_description(skill_div) -> Optional[str]:
     # Look for the ability-info-content div
     content_div = skill_div.find('div', class_='ability-info-content')
     if content_div:
-        # Get the full text content
-        description = content_div.get_text(strip=True)
+        # Get the full text content with space separator to preserve word boundaries
+        description = content_div.get_text(separator=' ', strip=True)
         if description:
             return description
     
